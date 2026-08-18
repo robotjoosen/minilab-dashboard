@@ -16,13 +16,17 @@ type MetricsFetcher func(baseURL string) (string, error)
 func PollDevice(s *store.Store, fetch MetricsFetcher, device domain.Device, threshold int, now time.Time) error {
 	text, err := fetch(device.Address)
 	if err != nil {
-		_, err := s.RecordPollFailure(device.ID, threshold)
+		if _, recErr := s.RecordPollFailure(device.ID, threshold); recErr != nil {
+			return recErr
+		}
 		return err
 	}
 
 	parsed, err := metricsparse.Parse(text)
 	if err != nil {
-		_, err := s.RecordPollFailure(device.ID, threshold)
+		if _, recErr := s.RecordPollFailure(device.ID, threshold); recErr != nil {
+			return recErr
+		}
 		return err
 	}
 

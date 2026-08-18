@@ -74,8 +74,9 @@ func TestPollDeviceStaysOnlineBelowFailureThreshold(t *testing.T) {
 
 	fetch := func(baseURL string) (string, error) { return "", errors.New("connection refused") }
 
-	if err := poller.PollDevice(s, fetch, device, 3, time.Now()); err != nil {
-		t.Fatalf("PollDevice() error = %v", err)
+	err := poller.PollDevice(s, fetch, device, 3, time.Now())
+	if err == nil || err.Error() != "connection refused" {
+		t.Fatalf("PollDevice() error = %v, want %q", err, "connection refused")
 	}
 
 	devices, _ := s.ListDevices()
@@ -90,8 +91,9 @@ func TestPollDeviceMarksUnreachableAtThreshold(t *testing.T) {
 	fetch := func(baseURL string) (string, error) { return "", errors.New("connection refused") }
 
 	for i := 0; i < 3; i++ {
-		if err := poller.PollDevice(s, fetch, device, 3, time.Now()); err != nil {
-			t.Fatalf("PollDevice() error = %v", err)
+		err := poller.PollDevice(s, fetch, device, 3, time.Now())
+		if err == nil || err.Error() != "connection refused" {
+			t.Fatalf("PollDevice() error = %v, want %q", err, "connection refused")
 		}
 	}
 

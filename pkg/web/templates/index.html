@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head><title>Mini Lab Dashboard</title></head>
+<body>
+<h1>Mini Lab Dashboard</h1>
+{{range .}}
+  <section>
+    <h2>{{.Device.Name}} ({{.Device.Status}})</h2>
+    <p>CPU user: {{.Host.CPUUser}}% | Mem used: {{.Host.MemUsed}} bytes</p>
+    <table>
+      <tr><th>Service</th><th>Type</th><th>State</th><th>Version</th><th></th></tr>
+      {{range .Services}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td>{{.Type}}</td>
+        <td>{{.LastState}}</td>
+        <td>{{.Version}}</td>
+        <td>
+          <form method="post" action="/watch?service_id={{.ID}}">
+            <button type="submit">{{if .Watched}}Unwatch{{else}}Watch{{end}}</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </table>
+  </section>
+{{end}}
+</body>
+</html>

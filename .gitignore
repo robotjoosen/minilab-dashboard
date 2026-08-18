@@ -1,0 +1,7 @@
+plans
+.superpowers
+.claude
+
+/bin/
+.env
+*.db

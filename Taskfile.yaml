@@ -1,0 +1,51 @@
+# minilab-dashboard/Taskfile.yaml
+version: '3'
+
+dotenv: ['.env', '.env.dist']
+
+tasks:
+  build:
+    vars:
+      ARCH: arm64
+      OUTPUT_PATH: "./bin/minilab-dashboard"
+      APPLICATION_PATH: "./cmd/app"
+    cmds:
+      - env GOOS=linux GOARCH={{.ARCH}} go build -o {{.OUTPUT_PATH}} {{.APPLICATION_PATH}}
+
+  install:
+    vars:
+      BINARY_PATH: "./bin/minilab-dashboard"
+      INSTALL_PATH: "/usr/local/bin/minilab-dashboard"
+      SERVICE_NAME: "minilab_dashboard"
+    platforms: [linux/arm64]
+    cmds:
+      - cp "{{.BINARY_PATH}}" "{{.INSTALL_PATH}}"
+      - sudo chmod +x "{{.INSTALL_PATH}}"
+      - |
+          bash -c "cat > /etc/systemd/system/{{.SERVICE_NAME}}.service" <<EOF
+          [Unit]
+          Description=Mini Lab monitoring dashboard
+          After=network.target
+
+          [Service]
+          Type=simple
+          ExecStart={{.INSTALL_PATH}}
+          Restart=on-failure
+          User=$USER
+          WorkingDirectory=/var/lib/minilab-dashboard
+          Environment=HTTP_LISTEN_ADDR=$HTTP_LISTEN_ADDR
+          Environment=SQLITE_PATH=$SQLITE_PATH
+          Environment=MDNS_AGENT_SERVICE_NAME=$MDNS_AGENT_SERVICE_NAME
+          Environment=MDNS_ESPHOME_SERVICE_NAME=$MDNS_ESPHOME_SERVICE_NAME
+          Environment=DISCOVERY_INTERVAL=$DISCOVERY_INTERVAL
+          Environment=POLL_INTERVAL=$POLL_INTERVAL
+          Environment=UNREACHABLE_THRESHOLD=$UNREACHABLE_THRESHOLD
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+      - sudo mkdir -p /var/lib/minilab-dashboard
+      - sudo systemctl daemon-reexec
+      - sudo systemctl daemon-reload
+      - sudo systemctl enable "{{.SERVICE_NAME}}"
+      - sudo systemctl start "{{.SERVICE_NAME}}"

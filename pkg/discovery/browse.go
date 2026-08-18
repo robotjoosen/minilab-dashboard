@@ -30,6 +30,7 @@ func Browse(serviceName string, timeout time.Duration, onEntry func(Entry)) erro
 	}()
 
 	params := mdns.DefaultParams(serviceName)
+	params.DisableIPv6 = true
 	params.Entries = entriesCh
 	params.Timeout = timeout
 

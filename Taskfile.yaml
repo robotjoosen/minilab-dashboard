@@ -5,6 +5,7 @@ dotenv: ['.env', '.env.dist']
 
 tasks:
   build:
+    desc: Cross-compile the binary for linux/arm64 (the deploy target)
     vars:
       ARCH: arm64
       OUTPUT_PATH: "./bin/minilab-dashboard"
@@ -12,41 +13,25 @@ tasks:
     cmds:
       - env GOOS=linux GOARCH={{.ARCH}} go build -o {{.OUTPUT_PATH}} {{.APPLICATION_PATH}}
 
+  run:
+    desc: Run the dashboard locally for testing (uses .env / .env.dist for config)
+    cmds:
+      - go run ./cmd/app
+
   install:
-    vars:
-      BINARY_PATH: "./bin/minilab-dashboard"
-      INSTALL_PATH: "/usr/local/bin/minilab-dashboard"
-      SERVICE_NAME: "minilab_dashboard"
+    desc: Install minilab-dashboard as a systemd service on this device (rocket)
     platforms: [linux/arm64]
     cmds:
-      - sudo cp "{{.BINARY_PATH}}" "{{.INSTALL_PATH}}"
-      - sudo chmod +x "{{.INSTALL_PATH}}"
-      - |
-          sudo bash -c "cat > /etc/systemd/system/{{.SERVICE_NAME}}.service" <<EOF
-          [Unit]
-          Description=Mini Lab monitoring dashboard
-          After=network.target
+      - ./scripts/install.sh
 
-          [Service]
-          Type=simple
-          ExecStart={{.INSTALL_PATH}}
-          Restart=on-failure
-          User=$USER
-          WorkingDirectory=/var/lib/minilab-dashboard
-          Environment=HTTP_LISTEN_ADDR=$HTTP_LISTEN_ADDR
-          Environment=SQLITE_PATH=$SQLITE_PATH
-          Environment=MDNS_AGENT_SERVICE_NAME=$MDNS_AGENT_SERVICE_NAME
-          Environment=MDNS_ESPHOME_SERVICE_NAME=$MDNS_ESPHOME_SERVICE_NAME
-          Environment=DISCOVERY_INTERVAL=$DISCOVERY_INTERVAL
-          Environment=POLL_INTERVAL=$POLL_INTERVAL
-          Environment=UNREACHABLE_THRESHOLD=$UNREACHABLE_THRESHOLD
+  update:
+    desc: Update an existing minilab-dashboard install to the latest release
+    platforms: [linux/arm64]
+    cmds:
+      - ./scripts/update.sh
 
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-      - sudo mkdir -p /var/lib/minilab-dashboard
-      - sudo chown "$USER" /var/lib/minilab-dashboard
-      - sudo systemctl daemon-reexec
-      - sudo systemctl daemon-reload
-      - sudo systemctl enable "{{.SERVICE_NAME}}"
-      - sudo systemctl start "{{.SERVICE_NAME}}"
+  uninstall:
+    desc: Remove minilab-dashboard from this device
+    platforms: [linux/arm64]
+    cmds:
+      - ./scripts/uninstall.sh

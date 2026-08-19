@@ -1,7 +1,4 @@
 // minilab-dashboard/cmd/app/main.go
-//go:build linux
-// +build linux
-
 package main
 
 import (

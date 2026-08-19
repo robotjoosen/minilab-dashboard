@@ -1,29 +1,518 @@
 <!doctype html>
-<html>
-<head><title>Mini Lab Dashboard</title></head>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini Lab // Ops Console</title>
+<style>
+  :root {
+    --bg: #0a0e0c;
+    --bg-raised: #101512;
+    --panel: #121815;
+    --panel-border: #232f28;
+    --hairline: #1b2420;
+    --text: #d9e6dd;
+    --text-dim: #6f8177;
+    --text-faint: #47554d;
+    --green: #4ee38a;
+    --green-glow: rgba(78, 227, 138, .55);
+    --red: #ff5f56;
+    --red-glow: rgba(255, 95, 86, .5);
+    --amber: #ffb454;
+    --amber-glow: rgba(255, 180, 84, .5);
+    --font: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", "Fira Code",
+            Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+  }
+
+  body {
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Scanline + vignette atmosphere, fixed to the viewport, decorative only. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 2px,
+      rgba(0, 0, 0, .12) 3px
+    );
+    mix-blend-mode: overlay;
+    animation: flicker 7s ease-in-out infinite;
+  }
+
+  /* Grain texture, self-contained inline SVG noise -- no network fetch. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    opacity: .05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .85; }
+  }
+
+  main, header, footer { position: relative; z-index: 3; }
+
+  header {
+    padding: 2.5rem clamp(1rem, 4vw, 3rem) 1.5rem;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: .75rem;
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .brand h1::after {
+    content: "_";
+    color: var(--green);
+    animation: blink 1.1s steps(2, jump-none) infinite;
+  }
+
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .brand .tag {
+    margin: .2rem 0 0;
+    font-size: .72rem;
+    letter-spacing: .28em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .summary {
+    font-size: .8rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+  }
+
+  .summary .count {
+    color: var(--green);
+    font-weight: 700;
+    font-size: 1rem;
+  }
+
+  .summary .led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px 2px var(--green-glow);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .45; }
+  }
+
+  main {
+    padding: 2rem clamp(1rem, 4vw, 3rem) 4rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1.25rem;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  .empty {
+    grid-column: 1 / -1;
+    border: 1px dashed var(--panel-border);
+    padding: 3rem 2rem;
+    text-align: center;
+    color: var(--text-dim);
+    letter-spacing: .08em;
+  }
+
+  .empty .big {
+    display: block;
+    font-size: 1rem;
+    color: var(--text);
+    margin-bottom: .5rem;
+    text-transform: uppercase;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-left: 3px solid var(--text-faint);
+    box-shadow: 0 12px 24px -12px rgba(0, 0, 0, .6);
+    opacity: 0;
+    animation: cardIn .5s ease-out forwards;
+    container-type: inline-size;
+    container-name: card;
+  }
+
+  /* The grid can hand a card any width depending on how many columns fit --
+     adapt to the card's own size, not the viewport's. */
+  @container card (max-width: 420px) {
+    .gauges { grid-template-columns: 1fr; }
+    .gauge-label { flex-wrap: wrap; gap: .2rem .5rem; }
+  }
+
+  .card.status-online { border-left-color: var(--green); }
+  .card.status-unreachable { border-left-color: var(--red); }
+
+  .card:nth-of-type(1) { animation-delay: .02s; }
+  .card:nth-of-type(2) { animation-delay: .08s; }
+  .card:nth-of-type(3) { animation-delay: .14s; }
+  .card:nth-of-type(4) { animation-delay: .2s; }
+  .card:nth-of-type(5) { animation-delay: .26s; }
+  .card:nth-of-type(n+6) { animation-delay: .3s; }
+
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .card-head {
+    padding: 1rem 1.25rem .75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .device-name {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .kind-tag {
+    font-size: .62rem;
+    letter-spacing: .1em;
+    color: var(--text-faint);
+    border: 1px solid var(--panel-border);
+    padding: .1rem .35rem;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: .25rem .55rem;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+
+  .pill::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .pill-online {
+    color: var(--green);
+    border-color: rgba(78, 227, 138, .3);
+    background: rgba(78, 227, 138, .08);
+  }
+  .pill-online::before {
+    background: var(--green);
+    box-shadow: 0 0 6px 1px var(--green-glow);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+
+  .pill-unreachable {
+    color: var(--red);
+    border-color: rgba(255, 95, 86, .3);
+    background: rgba(255, 95, 86, .08);
+  }
+  .pill-unreachable::before { background: var(--red); box-shadow: 0 0 6px 1px var(--red-glow); }
+
+  .gauges {
+    padding: 1rem 1.25rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .gauge-label {
+    display: flex;
+    justify-content: space-between;
+    gap: .5rem;
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: .35rem;
+  }
+
+  .gauge-label b { color: var(--text); font-weight: 700; }
+
+  .gauge-track {
+    height: 6px;
+    background: var(--bg-raised);
+    border: 1px solid var(--hairline);
+    overflow: hidden;
+  }
+
+  .gauge-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), var(--amber));
+  }
+
+  .gauge-fill.hot { background: linear-gradient(90deg, var(--amber), var(--red)); }
+
+  .awaiting {
+    padding: 1.1rem 1.25rem;
+    font-size: .72rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+  }
+
+  .awaiting .led {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 6px 1px var(--amber-glow);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  .services-head {
+    font-size: .62rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    padding: .5rem 1.25rem .4rem;
+    border-top: 1px solid var(--hairline);
+  }
+
+  .svc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .55rem 1.25rem;
+    border-top: 1px solid var(--hairline);
+    font-size: .78rem;
+  }
+
+  .svc-row:hover { background: rgba(255, 255, 255, .015); }
+
+  .svc-main {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .svc-id {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.4;
+    gap: .1rem;
+  }
+
+  .svc-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot-up { background: var(--green); box-shadow: 0 0 5px 1px var(--green-glow); }
+  .dot-down { background: var(--red); box-shadow: 0 0 5px 1px var(--red-glow); }
+  .dot-unknown { background: var(--text-faint); }
+
+  .svc-sub {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-width: 0;
+  }
+
+  .svc-type {
+    color: var(--text-dim);
+    font-size: .62rem;
+    flex: none;
+  }
+  .svc-type::before { content: "["; }
+  .svc-type::after { content: "]"; }
+
+  .svc-version {
+    color: var(--text-faint);
+    font-size: .68rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .watch-btn {
+    font-family: var(--font);
+    font-size: .66rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: .35rem .65rem;
+    border: 1px solid var(--panel-border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: border-color .15s, color .15s, background .15s, box-shadow .15s;
+    white-space: nowrap;
+  }
+
+  .watch-btn:hover {
+    border-color: var(--green);
+    color: var(--green);
+  }
+
+  .watch-btn.watching {
+    border-color: var(--amber);
+    color: var(--amber);
+    background: rgba(255, 180, 84, .1);
+    box-shadow: 0 0 10px -2px var(--amber-glow);
+  }
+
+  .watch-btn.watching:hover {
+    border-color: var(--red);
+    color: var(--red);
+    background: rgba(255, 95, 86, .08);
+  }
+
+  form { margin: 0; }
+
+  footer {
+    padding: 1.5rem clamp(1rem, 4vw, 3rem) 2.5rem;
+    text-align: center;
+    font-size: .66rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+</style>
+</head>
 <body>
-<h1>Mini Lab Dashboard</h1>
-{{range .}}
-  <section>
-    <h2>{{.Device.Name}} ({{.Device.Status}})</h2>
-    <p>CPU user: {{.Host.CPUUser}}% | Mem used: {{.Host.MemUsed}} bytes</p>
-    <table>
-      <tr><th>Service</th><th>Type</th><th>State</th><th>Version</th><th></th></tr>
-      {{range .Services}}
-      <tr>
-        <td>{{.Name}}</td>
-        <td>{{.Type}}</td>
-        <td>{{.LastState}}</td>
-        <td>{{.Version}}</td>
-        <td>
-          <form method="post" action="/watch?service_id={{.ID}}">
-            <button type="submit">{{if .Watched}}Unwatch{{else}}Watch{{end}}</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </table>
+
+<header>
+  <div class="brand">
+    <h1>Mini Lab</h1>
+    <p class="tag">Ops Console &middot; Read-Only Monitoring</p>
+  </div>
+  <div class="summary">
+    <span class="led"></span>
+    <span class="count">{{.Online}}</span> / {{.Total}} DEVICES ONLINE
+  </div>
+</header>
+
+<main>
+{{if .Devices}}
+  {{range .Devices}}
+  <section class="card status-{{.Device.Status}}">
+    <div class="card-head">
+      <h2 class="device-name">
+        {{.Device.Name}}
+        <span class="kind-tag">{{.Device.Kind}}</span>
+      </h2>
+      <span class="pill pill-{{.Device.Status}}">{{.Device.Status}}</span>
+    </div>
+
+    {{if .Polled}}
+    <div class="gauges">
+      <div>
+        <div class="gauge-label"><span>CPU</span> <b>{{.CPUUsedPercent}}%</b></div>
+        <div class="gauge-track"><div class="gauge-fill{{if ge .CPUUsedPercent 80}} hot{{end}}" style="width: {{.CPUUsedPercent}}%"></div></div>
+      </div>
+      <div>
+        <div class="gauge-label"><span>MEM</span> <b>{{.MemUsedHuman}} / {{.MemTotalHuman}}</b></div>
+        <div class="gauge-track"><div class="gauge-fill{{if ge .MemPercent 80}} hot{{end}}" style="width: {{.MemPercent}}%"></div></div>
+      </div>
+    </div>
+    {{else}}
+    <div class="awaiting"><span class="led"></span> Awaiting first poll&hellip;</div>
+    {{end}}
+
+    {{if .Services}}
+    <div class="services-head"><span>Service</span></div>
+    {{range .Services}}
+    <div class="svc-row">
+      <div class="svc-main">
+        <span class="dot {{if eq .LastState "up"}}dot-up{{else if eq .LastState "down"}}dot-down{{else}}dot-unknown{{end}}"></span>
+        <span class="svc-id">
+          <span class="svc-name" title="{{.Name}}">{{.Name}}</span>
+          <span class="svc-sub">
+            <span class="svc-type">{{.Type}}</span>
+            <span class="svc-version" title="{{.Version}}">{{if .Version}}{{.Version}}{{else}}&mdash;{{end}}</span>
+          </span>
+        </span>
+      </div>
+      <form method="post" action="/watch?service_id={{.ID}}">
+        <button type="submit" class="watch-btn{{if .Watched}} watching{{end}}">
+          {{if .Watched}}&#9679; Watching{{else}}Watch{{end}}
+        </button>
+      </form>
+    </div>
+    {{end}}
+    {{end}}
   </section>
+  {{end}}
+{{else}}
+  <div class="empty">
+    <span class="big">No devices discovered yet</span>
+    mDNS is still listening &mdash; agents will appear here as they're found
+  </div>
 {{end}}
+</main>
+
+<footer>minilab-dashboard &middot; discovers, watches, never writes</footer>
+
 </body>
 </html>

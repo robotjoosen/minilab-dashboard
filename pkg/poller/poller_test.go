@@ -69,6 +69,40 @@ func TestPollDeviceSuccessUpdatesHostStatsAndWatchedServices(t *testing.T) {
 	}
 }
 
+// sampleMetricsNoVersion mirrors a poll where the agent reports a service as up but the
+// payload carries no minilab_service_info line for it (e.g. an info line got dropped, or an
+// older agent build), so metricsparse.Parse leaves ParsedService.Version empty.
+const sampleMetricsNoVersion = `minilab_host_cpu_percent{mode="user"} 12.4
+minilab_host_cpu_percent{mode="system"} 3.1
+minilab_host_cpu_percent{mode="idle"} 84.5
+minilab_host_memory_bytes{state="used"} 1893000000
+minilab_host_memory_bytes{state="free"} 500000000
+minilab_host_memory_bytes{state="total"} 2393000000
+minilab_service_up{name="ollama",type="docker"} 1
+`
+
+func TestPollDeviceDoesNotClobberStoredVersionWithEmptyParsedVersion(t *testing.T) {
+	s, device := setup(t)
+
+	// Give the watched service a known non-empty version, as registration would have
+	// done from /capabilities.
+	watched, _ := s.ListWatchedServicesForDevice(device.ID)
+	if err := s.UpdateServiceState(watched[0].ID, "up", "0.4.2", time.Now()); err != nil {
+		t.Fatalf("UpdateServiceState() error = %v", err)
+	}
+
+	fetch := func(baseURL string) (string, error) { return sampleMetricsNoVersion, nil }
+
+	if err := poller.PollDevice(s, fetch, device, 3, time.Now()); err != nil {
+		t.Fatalf("PollDevice() error = %v", err)
+	}
+
+	watched, _ = s.ListWatchedServicesForDevice(device.ID)
+	if len(watched) != 1 || watched[0].LastState != "up" || watched[0].Version != "0.4.2" {
+		t.Fatalf("expected version to remain 0.4.2, got %+v", watched)
+	}
+}
+
 func TestPollDeviceStaysOnlineBelowFailureThreshold(t *testing.T) {
 	s, device := setup(t)
 

@@ -2,6 +2,7 @@ package metricsparse
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -27,12 +28,30 @@ type ParsedMetrics struct {
 	Services []ParsedService
 }
 
+// Parse decodes the Prometheus-text-format payload served by minilab-agent's /metrics
+// endpoint. Per-service state is split across two separate metric lines (see the agent's
+// pkg/handler/metrics/format.go): minilab_service_up{name,type} carries up/down status with
+// no version label, and a separate minilab_service_info{name,type,version} carries the
+// version. The two may appear in either order (today the agent emits all the _up lines
+// first, then all the _info lines), so entries are merged by service name as they're
+// encountered and only flattened into the Services slice once the whole payload has been
+// scanned.
 func Parse(text string) (ParsedMetrics, error) {
 	var result ParsedMetrics
+	services := map[string]*ParsedService{}
+
+	serviceFor := func(name string) *ParsedService {
+		svc := services[name]
+		if svc == nil {
+			svc = &ParsedService{Name: name}
+			services[name] = svc
+		}
+		return svc
+	}
 
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
@@ -61,13 +80,35 @@ func Parse(text string) (ParsedMetrics, error) {
 				result.Host.MemTotal = uint64(value)
 			}
 		case "minilab_service_up":
-			result.Services = append(result.Services, ParsedService{
-				Name:    labels["name"],
-				Type:    labels["type"],
-				Version: labels["version"],
-				Up:      value == 1,
-			})
+			svc := serviceFor(labels["name"])
+			svc.Type = labels["type"]
+			svc.Up = value == 1
+			// Some callers (and older test fixtures) put a version label directly on
+			// the up metric; keep honoring it, but never let an absent label here
+			// clobber a version already learned from minilab_service_info.
+			if v := labels["version"]; v != "" {
+				svc.Version = v
+			}
+		case "minilab_service_info":
+			svc := serviceFor(labels["name"])
+			if t := labels["type"]; t != "" {
+				svc.Type = t
+			}
+			if v := labels["version"]; v != "" {
+				svc.Version = v
+			}
 		}
+	}
+
+	names := make([]string, 0, len(services))
+	for name := range services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	result.Services = make([]ParsedService, 0, len(names))
+	for _, name := range names {
+		result.Services = append(result.Services, *services[name])
 	}
 
 	return result, nil

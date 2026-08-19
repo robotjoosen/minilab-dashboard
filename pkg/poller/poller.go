@@ -62,7 +62,12 @@ func PollDevice(s *store.Store, fetch MetricsFetcher, device domain.Device, thre
 		version := w.Version
 
 		if svc, ok := byName[w.Name]; ok {
-			version = svc.Version
+			// Never let an empty parsed version clobber a version we already have
+			// stored — metricsparse.Parse only fills Version when the payload
+			// actually carried a minilab_service_info line for this service.
+			if svc.Version != "" {
+				version = svc.Version
+			}
 			if svc.Up {
 				state = "up"
 			}

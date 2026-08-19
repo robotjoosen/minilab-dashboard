@@ -6,7 +6,7 @@ func (s *Store) UpsertDevice(name, address, kind string) (int64, error) {
 	_, err := s.db.Exec(`
 INSERT INTO devices (name, address, kind, status, last_seen)
 VALUES (?, ?, ?, 'online', CURRENT_TIMESTAMP)
-ON CONFLICT(name) DO UPDATE SET address = excluded.address, status = 'online', last_seen = CURRENT_TIMESTAMP
+ON CONFLICT(name) DO UPDATE SET address = excluded.address, status = 'online', last_seen = CURRENT_TIMESTAMP, failed_polls = 0
 `, name, address, kind)
 	if err != nil {
 		return 0, err

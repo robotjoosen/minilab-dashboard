@@ -19,10 +19,10 @@ tasks:
       SERVICE_NAME: "minilab_dashboard"
     platforms: [linux/arm64]
     cmds:
-      - cp "{{.BINARY_PATH}}" "{{.INSTALL_PATH}}"
+      - sudo cp "{{.BINARY_PATH}}" "{{.INSTALL_PATH}}"
       - sudo chmod +x "{{.INSTALL_PATH}}"
       - |
-          bash -c "cat > /etc/systemd/system/{{.SERVICE_NAME}}.service" <<EOF
+          sudo bash -c "cat > /etc/systemd/system/{{.SERVICE_NAME}}.service" <<EOF
           [Unit]
           Description=Mini Lab monitoring dashboard
           After=network.target
@@ -45,6 +45,7 @@ tasks:
           WantedBy=multi-user.target
           EOF
       - sudo mkdir -p /var/lib/minilab-dashboard
+      - sudo chown "$USER" /var/lib/minilab-dashboard
       - sudo systemctl daemon-reexec
       - sudo systemctl daemon-reload
       - sudo systemctl enable "{{.SERVICE_NAME}}"

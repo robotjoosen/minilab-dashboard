@@ -148,6 +148,56 @@ func TestRecordPollSuccessAndFailure(t *testing.T) {
 	}
 }
 
+// TestUpsertDeviceResetsFailedPollsOnReconnect guards the "3 consecutive failures" contract
+// across a reconnect: without resetting failed_polls, a device that hit the unreachable
+// threshold and then came back online (via a fresh UpsertDevice from a successful
+// /capabilities fetch) would be re-marked unreachable after a single subsequent poll
+// failure, instead of needing threshold consecutive failures again.
+func TestUpsertDeviceResetsFailedPollsOnReconnect(t *testing.T) {
+	s := openTestStore(t)
+
+	deviceID, err := s.UpsertDevice("rocket", "http://192.168.8.203:9100", "agent")
+	if err != nil {
+		t.Fatalf("UpsertDevice() error = %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if _, err := s.RecordPollFailure(deviceID, 3); err != nil {
+			t.Fatalf("RecordPollFailure() error = %v", err)
+		}
+	}
+
+	devices, _ := s.ListDevices()
+	if devices[0].Status != "unreachable" {
+		t.Fatalf("expected status unreachable after 3 failures, got %q", devices[0].Status)
+	}
+
+	// Device reconnects: discovery's /capabilities fetch succeeds and re-registers it.
+	if _, err := s.UpsertDevice("rocket", "http://192.168.8.203:9100", "agent"); err != nil {
+		t.Fatalf("UpsertDevice() second call error = %v", err)
+	}
+
+	devices, _ = s.ListDevices()
+	if devices[0].Status != "online" {
+		t.Fatalf("expected status online after reconnect, got %q", devices[0].Status)
+	}
+
+	// A single subsequent failure must NOT immediately re-mark it unreachable — that
+	// would mean failed_polls was left at 3 instead of being reset to 0.
+	unreachable, err := s.RecordPollFailure(deviceID, 3)
+	if err != nil {
+		t.Fatalf("RecordPollFailure() error = %v", err)
+	}
+	if unreachable {
+		t.Fatal("expected device to remain reachable after a single failure post-reconnect; failed_polls was not reset")
+	}
+
+	devices, _ = s.ListDevices()
+	if devices[0].Status != "online" {
+		t.Fatalf("expected status to remain online after 1 failure post-reconnect, got %q", devices[0].Status)
+	}
+}
+
 func TestSaveAndLatestHostStats(t *testing.T) {
 	s := openTestStore(t)
 	deviceID, _ := s.UpsertDevice("rocket", "http://192.168.8.203:9100", "agent")

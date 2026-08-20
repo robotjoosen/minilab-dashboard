@@ -31,3 +31,8 @@ type HostStats struct {
 	MemTotal  uint64
 	PolledAt  time.Time
 }
+
+type Temperature struct {
+	Sensor  string
+	Celsius float64
+}

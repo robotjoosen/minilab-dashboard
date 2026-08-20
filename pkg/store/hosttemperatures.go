@@ -1,0 +1,37 @@
+package store
+
+import "github.com/robotjoosen/minilab-dashboard/pkg/domain"
+
+func (s *Store) SaveHostTemperatures(deviceID int64, temperatures []domain.Temperature) error {
+	for _, t := range temperatures {
+		_, err := s.db.Exec(`
+INSERT INTO host_temperatures (device_id, sensor, celsius)
+VALUES (?, ?, ?)
+ON CONFLICT(device_id, sensor) DO UPDATE SET celsius = excluded.celsius
+`, deviceID, t.Sensor, t.Celsius)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *Store) ListHostTemperatures(deviceID int64) ([]domain.Temperature, error) {
+	rows, err := s.db.Query(`SELECT sensor, celsius FROM host_temperatures WHERE device_id = ? ORDER BY sensor`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var temperatures []domain.Temperature
+	for rows.Next() {
+		var t domain.Temperature
+		if err := rows.Scan(&t.Sensor, &t.Celsius); err != nil {
+			return nil, err
+		}
+		temperatures = append(temperatures, t)
+	}
+
+	return temperatures, rows.Err()
+}

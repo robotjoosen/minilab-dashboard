@@ -16,6 +16,11 @@ type ParsedHostStats struct {
 	MemTotal  uint64
 }
 
+type ParsedTemperature struct {
+	Sensor  string
+	Celsius float64
+}
+
 type ParsedService struct {
 	Name    string
 	Type    string
@@ -24,8 +29,9 @@ type ParsedService struct {
 }
 
 type ParsedMetrics struct {
-	Host     ParsedHostStats
-	Services []ParsedService
+	Host         ParsedHostStats
+	Temperatures []ParsedTemperature
+	Services     []ParsedService
 }
 
 // Parse decodes the Prometheus-text-format payload served by minilab-agent's /metrics
@@ -78,6 +84,10 @@ func Parse(text string) (ParsedMetrics, error) {
 				result.Host.MemFree = uint64(value)
 			case "total":
 				result.Host.MemTotal = uint64(value)
+			}
+		case "minilab_host_temperature_celsius":
+			if sensor := labels["sensor"]; sensor != "" {
+				result.Temperatures = append(result.Temperatures, ParsedTemperature{Sensor: sensor, Celsius: value})
 			}
 		case "minilab_service_up":
 			svc := serviceFor(labels["name"])

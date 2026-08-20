@@ -12,6 +12,7 @@ minilab_host_cpu_percent{mode="idle"} 84.5
 minilab_host_memory_bytes{state="used"} 1893000000
 minilab_host_memory_bytes{state="free"} 500000000
 minilab_host_memory_bytes{state="total"} 2393000000
+minilab_host_temperature_celsius{sensor="cpu-thermal"} 57.85
 minilab_service_up{name="nodered.service",type="systemd",version="2026-08-01T10:00:00Z"} 1
 minilab_service_up{name="ollama",type="docker",version="0.4.2"} 1
 minilab_service_up{name="rabbitmq",type="docker",version="3-management"} 0
@@ -28,6 +29,10 @@ func TestParse(t *testing.T) {
 	}
 	if got.Host.MemUsed != 1893000000 || got.Host.MemFree != 500000000 || got.Host.MemTotal != 2393000000 {
 		t.Fatalf("unexpected host mem: %+v", got.Host)
+	}
+
+	if len(got.Temperatures) != 1 || got.Temperatures[0].Sensor != "cpu-thermal" || got.Temperatures[0].Celsius != 57.85 {
+		t.Fatalf("unexpected temperatures: %+v", got.Temperatures)
 	}
 
 	if len(got.Services) != 3 {
@@ -129,6 +134,25 @@ minilab_service_info{name="ollama",type="docker",version="0.4.2"} 1
 	}
 	if len(got.Services) != 1 || got.Services[0].Version != "0.4.2" || !got.Services[0].Up {
 		t.Fatalf("unexpected services: %+v", got.Services)
+	}
+}
+
+func TestParseMultipleTemperatureSensors(t *testing.T) {
+	const withTemps = `minilab_host_temperature_celsius{sensor="cpu-thermal"} 57.85
+minilab_host_temperature_celsius{sensor="gpu-thermal"} 45.2
+`
+	got, err := metricsparse.Parse(withTemps)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(got.Temperatures) != 2 {
+		t.Fatalf("expected 2 temperatures, got %d: %+v", len(got.Temperatures), got.Temperatures)
+	}
+	if got.Temperatures[0].Sensor != "cpu-thermal" || got.Temperatures[0].Celsius != 57.85 {
+		t.Fatalf("unexpected first temperature: %+v", got.Temperatures[0])
+	}
+	if got.Temperatures[1].Sensor != "gpu-thermal" || got.Temperatures[1].Celsius != 45.2 {
+		t.Fatalf("unexpected second temperature: %+v", got.Temperatures[1])
 	}
 }
 

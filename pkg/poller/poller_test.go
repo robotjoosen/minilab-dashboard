@@ -17,6 +17,7 @@ minilab_host_cpu_percent{mode="idle"} 84.5
 minilab_host_memory_bytes{state="used"} 1893000000
 minilab_host_memory_bytes{state="free"} 500000000
 minilab_host_memory_bytes{state="total"} 2393000000
+minilab_host_temperature_celsius{sensor="cpu-thermal"} 57.85
 minilab_service_up{name="ollama",type="docker",version="0.4.3"} 1
 `
 
@@ -56,6 +57,14 @@ func TestPollDeviceSuccessUpdatesHostStatsAndWatchedServices(t *testing.T) {
 	}
 	if host.CPUUser != 12.4 {
 		t.Fatalf("unexpected host stats: %+v", host)
+	}
+
+	temperatures, err := s.ListHostTemperatures(device.ID)
+	if err != nil {
+		t.Fatalf("ListHostTemperatures() error = %v", err)
+	}
+	if len(temperatures) != 1 || temperatures[0].Sensor != "cpu-thermal" || temperatures[0].Celsius != 57.85 {
+		t.Fatalf("unexpected temperatures: %+v", temperatures)
 	}
 
 	watched, _ := s.ListWatchedServicesForDevice(device.ID)

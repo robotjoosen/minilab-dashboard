@@ -47,6 +47,14 @@ func PollDevice(s *store.Store, fetch MetricsFetcher, device domain.Device, thre
 		return err
 	}
 
+	temperatures := make([]domain.Temperature, len(parsed.Temperatures))
+	for i, t := range parsed.Temperatures {
+		temperatures[i] = domain.Temperature{Sensor: t.Sensor, Celsius: t.Celsius}
+	}
+	if err := s.SaveHostTemperatures(device.ID, temperatures); err != nil {
+		return err
+	}
+
 	watched, err := s.ListWatchedServicesForDevice(device.ID)
 	if err != nil {
 		return err

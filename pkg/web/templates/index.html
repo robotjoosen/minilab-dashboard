@@ -323,6 +323,27 @@
 
   .gauge-fill.hot { background: linear-gradient(90deg, var(--amber), var(--red)); }
 
+  .temps {
+    padding: 0 1.25rem 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem .9rem;
+  }
+
+  .temp-chip {
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .temp-value { color: var(--text); font-weight: 700; }
+  .temp-value.warm { color: var(--amber); }
+  .temp-value.hot { color: var(--red); }
+
   .awaiting {
     padding: 1.1rem 1.25rem;
     font-size: .72rem;
@@ -503,6 +524,17 @@
     <div class="awaiting"><span class="led"></span> Awaiting first poll&hellip;</div>
     {{end}}
 
+    {{if .Temperatures}}
+    <div class="temps">
+      {{range .Temperatures}}
+      <div class="temp-chip" data-sensor="{{.Sensor}}">
+        <span class="temp-sensor">{{.Sensor}}</span>
+        <b class="temp-value{{if .Class}} {{.Class}}{{end}}" data-role="temp-value">{{.CelsiusText}}&deg;C</b>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+
     {{if .Services}}
     <div class="services-head"><span>Service</span></div>
     {{range .Services}}
@@ -634,6 +666,13 @@
       if (curPoll && nextPoll && curPoll.className !== nextPoll.className) {
         curPoll.outerHTML = nextPoll.outerHTML;
       }
+
+      card.querySelectorAll(".temp-chip").forEach(chip => {
+        const nextChip = nextCard.querySelector('.temp-chip[data-sensor="' + chip.dataset.sensor + '"]');
+        if (!nextChip) return;
+        copyClass("temp-value", chip, nextChip);
+        copyText("temp-value", chip, nextChip);
+      });
 
       card.querySelectorAll(".svc-row").forEach(row => {
         const nextRow = nextCard.querySelector('.svc-row[data-service-id="' + row.dataset.serviceId + '"]');

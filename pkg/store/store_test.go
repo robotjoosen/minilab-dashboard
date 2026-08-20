@@ -230,3 +230,37 @@ func TestSaveAndLatestHostStats(t *testing.T) {
 		t.Fatalf("expected updated CPUUser 20.0, got %v", got.CPUUser)
 	}
 }
+
+func TestSaveAndListHostTemperatures(t *testing.T) {
+	s := openTestStore(t)
+	deviceID, _ := s.UpsertDevice("rocket", "http://192.168.8.203:9100", "agent")
+
+	if err := s.SaveHostTemperatures(deviceID, []domain.Temperature{
+		{Sensor: "cpu-thermal", Celsius: 57.85},
+		{Sensor: "gpu-thermal", Celsius: 45.2},
+	}); err != nil {
+		t.Fatalf("SaveHostTemperatures() error = %v", err)
+	}
+
+	got, err := s.ListHostTemperatures(deviceID)
+	if err != nil {
+		t.Fatalf("ListHostTemperatures() error = %v", err)
+	}
+	if len(got) != 2 || got[0].Sensor != "cpu-thermal" || got[0].Celsius != 57.85 || got[1].Sensor != "gpu-thermal" {
+		t.Fatalf("unexpected temperatures: %+v", got)
+	}
+
+	// Saving again should update in place, not duplicate.
+	if err := s.SaveHostTemperatures(deviceID, []domain.Temperature{{Sensor: "cpu-thermal", Celsius: 61.0}}); err != nil {
+		t.Fatalf("SaveHostTemperatures() second call error = %v", err)
+	}
+	got, _ = s.ListHostTemperatures(deviceID)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 temperatures after re-saving one sensor, got %+v", got)
+	}
+	for _, temp := range got {
+		if temp.Sensor == "cpu-thermal" && temp.Celsius != 61.0 {
+			t.Fatalf("expected cpu-thermal updated to 61.0, got %+v", temp)
+		}
+	}
+}

@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS host_stats (
 	mem_total INTEGER NOT NULL DEFAULT 0,
 	polled_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS host_temperatures (
+	device_id INTEGER NOT NULL REFERENCES devices(id),
+	sensor TEXT NOT NULL,
+	celsius REAL NOT NULL DEFAULT 0,
+	UNIQUE(device_id, sensor)
+);
 `)
 	return err
 }

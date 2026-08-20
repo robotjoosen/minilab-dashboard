@@ -27,6 +27,13 @@ type indexViewDevice struct {
 	MemHuman       string
 	MemPercent     int
 	CPUUsedPercent int
+	Temperatures   []indexViewTemperature
+}
+
+type indexViewTemperature struct {
+	Sensor      string
+	CelsiusText string
+	Class       string // "", "warm", or "hot" -- mirrors the gauge-fill "hot" threshold styling
 }
 
 type indexView struct {
@@ -61,6 +68,12 @@ func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		host, _ := h.Store.LatestHostStats(d.ID) // zero-value HostStats if never polled yet
 
+		temperatures, err := h.Store.ListHostTemperatures(d.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		if d.Status == "online" {
 			view.Online++
 		}
@@ -76,6 +89,15 @@ func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			dv.MemPercent = clampPercent(int(float64(host.MemUsed) / float64(host.MemTotal) * 100))
 		}
 		dv.CPUUsedPercent = clampPercent(int(100 - host.CPUIdle))
+
+		dv.Temperatures = make([]indexViewTemperature, len(temperatures))
+		for i, t := range temperatures {
+			dv.Temperatures[i] = indexViewTemperature{
+				Sensor:      t.Sensor,
+				CelsiusText: fmt.Sprintf("%.1f", t.Celsius),
+				Class:       classifyTemp(t.Celsius),
+			}
+		}
 
 		view.Devices = append(view.Devices, dv)
 	}
@@ -102,6 +124,20 @@ func humanizeBytePair(used, total uint64) string {
 	}
 
 	return fmt.Sprintf("%.1f/%.1f %ciB", float64(used)/float64(div), float64(total)/float64(div), "KMGTPE"[exp])
+}
+
+// classifyTemp buckets a sensor reading into the same warm/hot styling used elsewhere for
+// resource pressure -- thresholds picked for typical SBC CPU thermals, not any specific board's
+// datasheet limit.
+func classifyTemp(celsius float64) string {
+	switch {
+	case celsius >= 75:
+		return "hot"
+	case celsius >= 60:
+		return "warm"
+	default:
+		return ""
+	}
 }
 
 // clampPercent keeps a percentage within [0, 100] -- guards against a momentarily

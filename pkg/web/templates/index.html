@@ -541,6 +541,35 @@
 
 <footer>minilab-dashboard &middot; discovers, watches, never writes</footer>
 
+{{if .EditMode}}
+<script>
+  // Submits watch/unwatch via fetch and flips the button in place instead of
+  // letting the form navigate -- a full-page reload per click made selecting
+  // several services in a row tedious (lost scroll position, replayed the
+  // card animation). Falls back to the plain form submit if the request fails.
+  document.querySelectorAll('.svc-row form').forEach(form => {
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      let res;
+      try {
+        res = await fetch(form.action, { method: 'POST' });
+      } catch {
+        form.submit();
+        return;
+      }
+      if (!res.ok) {
+        form.submit();
+        return;
+      }
+      const btn = form.querySelector('.watch-btn');
+      const nowWatching = !btn.classList.contains('watching');
+      btn.classList.toggle('watching', nowWatching);
+      btn.textContent = nowWatching ? '● Watching' : 'Watch';
+    });
+  });
+</script>
+{{end}}
+
 {{if not .EditMode}}
 <script>
   // Re-fetches this same page and patches just the text/classes/bar-widths that

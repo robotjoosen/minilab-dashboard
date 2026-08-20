@@ -41,15 +41,29 @@ func main() {
 	mux.Handle("/watch", &web.ToggleHandler{Store: s})
 
 	httpServer := &http.Server{Addr: e.HTTPListenAddr, Handler: mux}
+	httpErr := make(chan error, 1)
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("http server stopped", slog.String("error", err.Error()))
+			httpErr <- err
+			return
 		}
+		httpErr <- nil
 	}()
 
 	slog.Info("minilab-dashboard started", slog.String("http_addr", e.HTTPListenAddr))
 
-	<-ctx.Done()
+	// A failed bind (e.g. the configured port already in use) must be fatal -- the
+	// web UI is the whole point of this process, and discovery/polling running on
+	// in the background otherwise leaves systemd reporting "active" indefinitely
+	// for a dashboard nobody can reach.
+	select {
+	case <-ctx.Done():
+	case err := <-httpErr:
+		if err != nil {
+			slog.Error("http server failed to start", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

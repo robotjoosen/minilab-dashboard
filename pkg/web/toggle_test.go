@@ -38,6 +38,28 @@ func TestToggleHandlerTogglesWatch(t *testing.T) {
 	}
 }
 
+func TestToggleHandlerPreservesEditModeOnRedirect(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	defer s.Close()
+
+	deviceID, _ := s.UpsertDevice("rocket", "http://192.168.8.203:9100", "agent")
+	_ = s.UpsertDiscoveredServices(deviceID, []domain.Service{{Name: "ollama", Type: "docker"}})
+	services, _ := s.ListServicesForDevice(deviceID)
+
+	handler := &web.ToggleHandler{Store: s}
+
+	req := httptest.NewRequest(http.MethodPost, "/watch?service_id="+itoa(services[0].ID)+"&edit=1", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Location"); got != "/?edit=1" {
+		t.Fatalf("expected redirect to /?edit=1, got %q", got)
+	}
+}
+
 func TestToggleHandlerRejectsGet(t *testing.T) {
 	handler := &web.ToggleHandler{}
 

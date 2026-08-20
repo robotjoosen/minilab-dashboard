@@ -28,5 +28,9 @@ func (h *ToggleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	target := "/"
+	if r.URL.Query().Get("edit") == "1" {
+		target = "/?edit=1"
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }

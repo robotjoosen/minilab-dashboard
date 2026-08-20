@@ -24,16 +24,16 @@ type indexViewDevice struct {
 	Services       []domain.Service
 	Host           domain.HostStats
 	Polled         bool // false until the poller has ever successfully reached this device
-	MemUsedHuman   string
-	MemTotalHuman  string
+	MemHuman       string
 	MemPercent     int
 	CPUUsedPercent int
 }
 
 type indexView struct {
-	Devices []indexViewDevice
-	Total   int
-	Online  int
+	Devices  []indexViewDevice
+	Total    int
+	Online   int
+	EditMode bool
 }
 
 func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -43,9 +43,17 @@ func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := indexView{Devices: make([]indexViewDevice, 0, len(devices)), Total: len(devices)}
+	editMode := r.URL.Query().Get("edit") == "1"
+
+	view := indexView{Devices: make([]indexViewDevice, 0, len(devices)), Total: len(devices), EditMode: editMode}
 	for _, d := range devices {
-		services, err := h.Store.ListServicesForDevice(d.ID)
+		var services []domain.Service
+		var err error
+		if editMode {
+			services, err = h.Store.ListServicesForDevice(d.ID)
+		} else {
+			services, err = h.Store.ListWatchedServicesForDevice(d.ID)
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -58,12 +66,11 @@ func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		dv := indexViewDevice{
-			Device:        d,
-			Services:      services,
-			Host:          host,
-			Polled:        !host.PolledAt.IsZero(),
-			MemUsedHuman:  humanizeBytes(host.MemUsed),
-			MemTotalHuman: humanizeBytes(host.MemTotal),
+			Device:   d,
+			Services: services,
+			Host:     host,
+			Polled:   !host.PolledAt.IsZero(),
+			MemHuman: humanizeBytePair(host.MemUsed, host.MemTotal),
 		}
 		if host.MemTotal > 0 {
 			dv.MemPercent = clampPercent(int(float64(host.MemUsed) / float64(host.MemTotal) * 100))
@@ -79,20 +86,22 @@ func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// humanizeBytes renders n as a human-readable size ("1.8 GiB") rather than a raw byte count.
-func humanizeBytes(n uint64) string {
+// humanizeBytePair renders used and total as a shared-unit pair ("1.4/7.7 GiB") rather than
+// two independently-scaled sizes -- keeps the label short enough to stay on one line next to
+// "MEM" at narrower card widths.
+func humanizeBytePair(used, total uint64) string {
 	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
+	if total < unit {
+		return fmt.Sprintf("%d/%d B", used, total)
 	}
 
 	div, exp := uint64(unit), 0
-	for r := n / unit; r >= unit; r /= unit {
+	for r := total / unit; r >= unit; r /= unit {
 		div *= unit
 		exp++
 	}
 
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+	return fmt.Sprintf("%.1f/%.1f %ciB", float64(used)/float64(div), float64(total)/float64(div), "KMGTPE"[exp])
 }
 
 // clampPercent keeps a percentage within [0, 100] -- guards against a momentarily

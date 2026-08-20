@@ -127,6 +127,25 @@
     font-size: 1rem;
   }
 
+  .mode-toggle {
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: .3rem .6rem;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .mode-toggle:hover { border-color: var(--green); color: var(--green); }
+
+  .mode-toggle.active {
+    border-color: var(--amber);
+    color: var(--amber);
+    background: rgba(255, 180, 84, .1);
+  }
+
   .summary .led {
     width: 8px;
     height: 8px;
@@ -299,6 +318,7 @@
   .gauge-fill {
     height: 100%;
     background: linear-gradient(90deg, var(--green), var(--amber));
+    transition: width .6s ease-out;
   }
 
   .gauge-fill.hot { background: linear-gradient(90deg, var(--amber), var(--red)); }
@@ -449,31 +469,34 @@
   </div>
   <div class="summary">
     <span class="led"></span>
-    <span class="count">{{.Online}}</span> / {{.Total}} DEVICES ONLINE
+    <span class="count" data-role="online">{{.Online}}</span> / <span data-role="total">{{.Total}}</span> DEVICES ONLINE
+    <a class="mode-toggle{{if .EditMode}} active{{end}}" href="{{if .EditMode}}/{{else}}/?edit=1{{end}}">
+      {{if .EditMode}}&#10003; Done{{else}}Edit&hellip;{{end}}
+    </a>
   </div>
 </header>
 
 <main>
 {{if .Devices}}
   {{range .Devices}}
-  <section class="card status-{{.Device.Status}}">
+  <section class="card status-{{.Device.Status}}" data-device-id="{{.Device.ID}}">
     <div class="card-head">
       <h2 class="device-name">
         {{.Device.Name}}
         <span class="kind-tag">{{.Device.Kind}}</span>
       </h2>
-      <span class="pill pill-{{.Device.Status}}">{{.Device.Status}}</span>
+      <span class="pill pill-{{.Device.Status}}" data-role="pill">{{.Device.Status}}</span>
     </div>
 
     {{if .Polled}}
     <div class="gauges">
       <div>
-        <div class="gauge-label"><span>CPU</span> <b>{{.CPUUsedPercent}}%</b></div>
-        <div class="gauge-track"><div class="gauge-fill{{if ge .CPUUsedPercent 80}} hot{{end}}" style="width: {{.CPUUsedPercent}}%"></div></div>
+        <div class="gauge-label"><span>CPU</span> <b data-role="cpu-pct">{{.CPUUsedPercent}}%</b></div>
+        <div class="gauge-track"><div class="gauge-fill{{if ge .CPUUsedPercent 80}} hot{{end}}" data-role="cpu-fill" style="width: {{.CPUUsedPercent}}%"></div></div>
       </div>
       <div>
-        <div class="gauge-label"><span>MEM</span> <b>{{.MemUsedHuman}} / {{.MemTotalHuman}}</b></div>
-        <div class="gauge-track"><div class="gauge-fill{{if ge .MemPercent 80}} hot{{end}}" style="width: {{.MemPercent}}%"></div></div>
+        <div class="gauge-label"><span>MEM</span> <b data-role="mem-text">{{.MemHuman}}</b></div>
+        <div class="gauge-track"><div class="gauge-fill{{if ge .MemPercent 80}} hot{{end}}" data-role="mem-fill" style="width: {{.MemPercent}}%"></div></div>
       </div>
     </div>
     {{else}}
@@ -483,24 +506,28 @@
     {{if .Services}}
     <div class="services-head"><span>Service</span></div>
     {{range .Services}}
-    <div class="svc-row">
+    <div class="svc-row" data-service-id="{{.ID}}">
       <div class="svc-main">
-        <span class="dot {{if eq .LastState "up"}}dot-up{{else if eq .LastState "down"}}dot-down{{else}}dot-unknown{{end}}"></span>
+        <span class="dot {{if eq .LastState "up"}}dot-up{{else if eq .LastState "down"}}dot-down{{else}}dot-unknown{{end}}" data-role="dot"></span>
         <span class="svc-id">
           <span class="svc-name" title="{{.Name}}">{{.Name}}</span>
           <span class="svc-sub">
             <span class="svc-type">{{.Type}}</span>
-            <span class="svc-version" title="{{.Version}}">{{if .Version}}{{.Version}}{{else}}&mdash;{{end}}</span>
+            <span class="svc-version" title="{{.Version}}" data-role="version">{{if .Version}}{{.Version}}{{else}}&mdash;{{end}}</span>
           </span>
         </span>
       </div>
-      <form method="post" action="/watch?service_id={{.ID}}">
+      {{if $.EditMode}}
+      <form method="post" action="/watch?service_id={{.ID}}&edit=1">
         <button type="submit" class="watch-btn{{if .Watched}} watching{{end}}">
           {{if .Watched}}&#9679; Watching{{else}}Watch{{end}}
         </button>
       </form>
+      {{end}}
     </div>
     {{end}}
+    {{else if not $.EditMode}}
+    <div class="awaiting"><span class="led"></span> No services watched &mdash; use Edit to choose</div>
     {{end}}
   </section>
   {{end}}
@@ -513,6 +540,84 @@
 </main>
 
 <footer>minilab-dashboard &middot; discovers, watches, never writes</footer>
+
+{{if not .EditMode}}
+<script>
+  // Re-fetches this same page and patches just the text/classes/bar-widths that
+  // changed, instead of a full reload -- avoids the flash and re-running the
+  // card entrance animation every cycle. Paused in edit mode (see .EditMode
+  // guard above) so a background patch can't land mid-click while choosing
+  // services. Falls back to a real reload if the set of devices changed,
+  // since that's a structural change this patcher doesn't attempt to diff.
+  async function refreshDashboard() {
+    let html;
+    try {
+      const res = await fetch(location.href, { cache: "no-store" });
+      if (!res.ok) return;
+      html = await res.text();
+    } catch {
+      return;
+    }
+
+    const next = new DOMParser().parseFromString(html, "text/html");
+
+    const ids = root => [...root.querySelectorAll(".card")].map(c => c.dataset.deviceId).join(",");
+    if (ids(document) !== ids(next)) {
+      location.reload();
+      return;
+    }
+
+    const copyText = (role, curRoot, nextRoot) => {
+      const cur = curRoot.querySelector('[data-role="' + role + '"]');
+      const nxt = nextRoot.querySelector('[data-role="' + role + '"]');
+      if (cur && nxt) cur.textContent = nxt.textContent;
+    };
+    const copyClass = (role, curRoot, nextRoot) => {
+      const cur = curRoot.querySelector('[data-role="' + role + '"]');
+      const nxt = nextRoot.querySelector('[data-role="' + role + '"]');
+      if (cur && nxt) cur.className = nxt.className;
+    };
+
+    copyText("online", document, next);
+    copyText("total", document, next);
+
+    document.querySelectorAll(".card").forEach(card => {
+      const nextCard = next.querySelector('.card[data-device-id="' + card.dataset.deviceId + '"]');
+      if (!nextCard) return;
+
+      card.className = nextCard.className;
+      copyClass("pill", card, nextCard);
+      copyText("pill", card, nextCard);
+      copyText("cpu-pct", card, nextCard);
+      copyText("mem-text", card, nextCard);
+
+      ["cpu-fill", "mem-fill"].forEach(role => {
+        const cur = card.querySelector('[data-role="' + role + '"]');
+        const nxt = nextCard.querySelector('[data-role="' + role + '"]');
+        if (cur && nxt) {
+          cur.className = nxt.className;
+          cur.style.width = nxt.style.width;
+        }
+      });
+
+      const curPoll = card.querySelector(".gauges, .awaiting");
+      const nextPoll = nextCard.querySelector(".gauges, .awaiting");
+      if (curPoll && nextPoll && curPoll.className !== nextPoll.className) {
+        curPoll.outerHTML = nextPoll.outerHTML;
+      }
+
+      card.querySelectorAll(".svc-row").forEach(row => {
+        const nextRow = nextCard.querySelector('.svc-row[data-service-id="' + row.dataset.serviceId + '"]');
+        if (!nextRow) return;
+        copyClass("dot", row, nextRow);
+        copyText("version", row, nextRow);
+      });
+    });
+  }
+
+  setInterval(refreshDashboard, 10000);
+</script>
+{{end}}
 
 </body>
 </html>

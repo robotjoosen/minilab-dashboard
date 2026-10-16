@@ -106,28 +106,41 @@ defaults.
 | `DISCOVERY_INTERVAL` | `1m` | How often to re-browse mDNS |
 | `POLL_INTERVAL` | `15s` | How often to poll watched services |
 | `UNREACHABLE_THRESHOLD` | `3` | Consecutive failed polls before a device is marked unreachable (min 1) |
-| `TLS_CA_FILE` | empty | PEM of the private CA that signs every certificate (dashboard, agents, browsers) |
-| `TLS_CERT_FILE` | empty | PEM certificate of this dashboard |
-| `TLS_KEY_FILE` | empty | PEM private key of this dashboard |
+| `TLS_CA_FILE` | empty | PEM of the private CA that signs every certificate (agents, dashboard, browsers) |
+| `TLS_CLIENT_CERT_FILE` | empty | Certificate the dashboard shows to agents (`clientAuth`) |
+| `TLS_CLIENT_KEY_FILE` | empty | Its private key |
+| `TLS_CERT_FILE` | empty | Certificate for the web UI (`serverAuth`) |
+| `TLS_KEY_FILE` | empty | Its private key |
 
 `DISCOVERY_INTERVAL` and `POLL_INTERVAL` must be greater than zero; the dashboard refuses to
 start otherwise.
 
 ### Mutual TLS
 
-Set all three `TLS_*` variables (or none — setting only some is a startup error) and:
+Works with [minilab-agent](https://github.com/robotjoosen/minilab-agent)'s mTLS and its
+`scripts/gen-certs.sh`. Both halves are optional and independent; setting a cert without its
+key, or either without `TLS_CA_FILE`, is a startup error.
 
-- **Web UI** is served over HTTPS and requires a client certificate signed by your CA, so only
-  browsers you have issued a certificate to can open it or toggle watches.
-- **Agent calls** (`/capabilities`, `/metrics`) use `https://`, present the dashboard's
-  certificate, and only accept agents whose certificate your CA signed.
+```bash
+# in minilab-agent, on a machine you trust (ca.key stays offline)
+./scripts/gen-certs.sh ca
+./scripts/gen-certs.sh server rocket          # one per agent device -> agent's TLS_CERT/KEY
+./scripts/gen-certs.sh client dashboard       # dashboard -> agents: TLS_CLIENT_CERT/KEY
+./scripts/gen-certs.sh server dashboard-ui 192.168.8.203   # web UI: TLS_CERT/KEY
+./scripts/gen-certs.sh client roald           # a browser client certificate (import as .p12)
+```
 
-Agents are found by IP over mDNS and DHCP addresses change, so the agent's certificate is
-checked against the CA but **not against its hostname/IP** — which is why the CA must be private
-and used for nothing else. The dashboard certificate needs both `serverAuth` and `clientAuth`
-extended key usage. Each agent must be run with TLS and require client certificates from the same
-CA (a matching change in `minilab-agent`, not part of this repo); until it is, leave the `TLS_*`
-variables empty.
+- **Agent calls** — set `TLS_CA_FILE`, `TLS_CLIENT_CERT_FILE`, `TLS_CLIENT_KEY_FILE`. Calls to
+  agents go over `https://`, present the client certificate, and only accept agents signed by
+  the CA. Without them calls are plain `http://`, matching agents run with `TLS_DISABLED=true`;
+  one setting covers every agent, so a mixed fleet is not supported.
+- **Web UI** — set `TLS_CA_FILE`, `TLS_CERT_FILE`, `TLS_KEY_FILE`. The UI is served over HTTPS
+  and every browser must present a client certificate from the CA. Use the `server` role (the
+  browser needs a `serverAuth` certificate whose name or IP matches the address you open).
+
+Agents are found by IP over mDNS and DHCP addresses change, so an agent's certificate is checked
+against the CA but **not against its hostname/IP**; keep the CA private and used for nothing
+else. Certificates are read at startup: restart after renewing.
 
 ## Development
 

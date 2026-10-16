@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -40,13 +41,14 @@ func newCA(t *testing.T) ca {
 }
 
 // writeLeaf writes a CA-signed cert (usable as client and server) and returns file paths.
-func (c ca) writeLeaf(t *testing.T, dir, name string) (certPath, keyPath string) {
+// writeLeaf writes a CA-signed cert with the given usage and returns file paths.
+func (c ca) writeLeaf(t *testing.T, dir, name string, usage x509.ExtKeyUsage) (certPath, keyPath string) {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: name},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		ExtKeyUsage: []x509.ExtKeyUsage{usage},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, &key.PublicKey, c.key)
 	if err != nil {
@@ -67,61 +69,70 @@ func (c ca) writeCert(t *testing.T, dir string) string {
 	return p
 }
 
-func TestLoadOffAndPartial(t *testing.T) {
-	if c, s, err := tlsconf.Load("", "", ""); c != nil || s != nil || err != nil {
-		t.Fatalf("expected TLS off, got %v %v %v", c, s, err)
+func TestOffAndPartial(t *testing.T) {
+	if c, err := tlsconf.Client("", "", ""); c != nil || err != nil {
+		t.Fatalf("expected client TLS off, got %v %v", c, err)
 	}
-	if _, _, err := tlsconf.Load("ca.crt", "", ""); err == nil {
-		t.Fatal("expected an error for a partial TLS config")
+	if s, err := tlsconf.Server("ca.crt", "", ""); s != nil || err != nil {
+		t.Fatalf("expected server TLS off, got %v %v", s, err)
+	}
+	if _, err := tlsconf.Client("", "a.crt", "a.key"); err == nil {
+		t.Fatal("expected an error for a client cert without a CA")
+	}
+	if _, err := tlsconf.Server("ca.crt", "a.crt", ""); err == nil {
+		t.Fatal("expected an error for a server cert without a key")
 	}
 }
 
+// TestMutualTLS mirrors the minilab-agent scripts/gen-certs.sh certificates: the agent has a
+// serverAuth-only certificate, the dashboard's agent-facing certificate is clientAuth-only.
 func TestMutualTLS(t *testing.T) {
 	dir := t.TempDir()
 	good, evil := newCA(t), newCA(t)
 	caPath := good.writeCert(t, dir)
-	srvCert, srvKey := good.writeLeaf(t, dir, "agent")
-	cliCert, cliKey := good.writeLeaf(t, dir, "dashboard")
-	evilCert, evilKey := evil.writeLeaf(t, dir, "evil")
+	agentCert, agentKey := good.writeLeaf(t, dir, "agent", x509.ExtKeyUsageServerAuth)
+	dashCert, dashKey := good.writeLeaf(t, dir, "dashboard", x509.ExtKeyUsageClientAuth)
+	evilCert, evilKey := evil.writeLeaf(t, dir, "evil", x509.ExtKeyUsageClientAuth)
 
-	// The "agent": a server that requires a client certificate from our CA.
-	_, serverCfg, err := tlsconf.Load(caPath, srvCert, srvKey)
+	// The "agent" requires a client certificate from our CA (same as minilab-agent).
+	agentCfg, err := tlsconf.Server(caPath, agentCert, agentKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	srv.TLS = serverCfg
+	srv.TLS = agentCfg
 	srv.StartTLS()
 	defer srv.Close()
 
-	clientCfg, _, err := tlsconf.Load(caPath, cliCert, cliKey)
+	get := func(cfg *tls.Config, url string) error {
+		resp, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: cfg}}).Get(url)
+		if err == nil {
+			resp.Body.Close()
+		}
+		return err
+	}
+
+	clientCfg, err := tlsconf.Client(caPath, dashCert, dashKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	resp, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: clientCfg}}).Get(srv.URL)
-	if err != nil {
+	if err := get(clientCfg, srv.URL); err != nil {
 		t.Fatalf("trusted client rejected: %v", err)
 	}
-	resp.Body.Close()
 
-	// A client certificate from another CA must be refused by the server.
-	evilClient, _, _ := tlsconf.Load(caPath, evilCert, evilKey)
-	if resp, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: evilClient}}).Get(srv.URL); err == nil {
-		resp.Body.Close()
+	evilClient, _ := tlsconf.Client(caPath, evilCert, evilKey)
+	if get(evilClient, srv.URL) == nil {
 		t.Fatal("server accepted a client certificate from an untrusted CA")
 	}
 
-	// A server certificate from another CA must be refused by our client.
 	evilCA := evil.writeCert(t, t.TempDir())
-	evilSrvCert, evilSrvKey := evil.writeLeaf(t, dir, "evilsrv")
-	_, evilServerCfg, _ := tlsconf.Load(evilCA, evilSrvCert, evilSrvKey)
+	evilSrvCert, evilSrvKey := evil.writeLeaf(t, dir, "evilsrv", x509.ExtKeyUsageServerAuth)
+	evilServerCfg, _ := tlsconf.Server(evilCA, evilSrvCert, evilSrvKey)
 	bad := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	bad.TLS = evilServerCfg
 	bad.StartTLS()
 	defer bad.Close()
-	if resp, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: clientCfg}}).Get(bad.URL); err == nil {
-		resp.Body.Close()
+	if get(clientCfg, bad.URL) == nil {
 		t.Fatal("client accepted a server certificate from an untrusted CA")
 	}
 }

@@ -29,6 +29,8 @@ type Environment struct {
 	PollInterval         time.Duration `mapstructure:"POLL_INTERVAL"`
 	UnreachableThreshold int           `mapstructure:"UNREACHABLE_THRESHOLD"`
 	TLSCAFile            string        `mapstructure:"TLS_CA_FILE"`
+	TLSClientCertFile    string        `mapstructure:"TLS_CLIENT_CERT_FILE"`
+	TLSClientKeyFile     string        `mapstructure:"TLS_CLIENT_KEY_FILE"`
 	TLSCertFile          string        `mapstructure:"TLS_CERT_FILE"`
 	TLSKeyFile           string        `mapstructure:"TLS_KEY_FILE"`
 }
@@ -47,6 +49,8 @@ func loadEnv() Environment {
 		"POLL_INTERVAL":           defaultPollInterval,
 		"UNREACHABLE_THRESHOLD":   defaultUnreachableThreshold,
 		"TLS_CA_FILE":             "",
+		"TLS_CLIENT_CERT_FILE":    "",
+		"TLS_CLIENT_KEY_FILE":     "",
 		"TLS_CERT_FILE":           "",
 		"TLS_KEY_FILE":            "",
 	})

@@ -31,9 +31,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	clientTLS, serverTLS, err := tlsconf.Load(e.TLSCAFile, e.TLSCertFile, e.TLSKeyFile)
+	clientTLS, err := tlsconf.Client(e.TLSCAFile, e.TLSClientCertFile, e.TLSClientKeyFile)
 	if err != nil {
-		slog.Error("failed to load TLS config", slog.String("error", err.Error()))
+		slog.Error("failed to load agent TLS config", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	serverTLS, err := tlsconf.Server(e.TLSCAFile, e.TLSCertFile, e.TLSKeyFile)
+	if err != nil {
+		slog.Error("failed to load web TLS config", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	scheme := "http"

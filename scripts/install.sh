@@ -136,7 +136,7 @@ main() {
 
   echo
   info "configuration (press enter to accept the default)"
-  local http_listen_addr sqlite_path mdns_agent_service_name tls_ca tls_cert tls_key
+  local http_listen_addr sqlite_path mdns_agent_service_name tls_ca tls_client_cert tls_client_key tls_cert tls_key
   local discovery_interval poll_interval unreachable_threshold
   http_listen_addr=$(prompt_with_default "HTTP listen addr" "$DEFAULT_HTTP_LISTEN_ADDR")
   sqlite_path=$(prompt_with_default "SQLite path (relative to ${DATA_DIR})" "$DEFAULT_SQLITE_PATH")
@@ -144,10 +144,12 @@ main() {
   discovery_interval=$(prompt_with_default "Discovery interval" "$DEFAULT_DISCOVERY_INTERVAL")
   poll_interval=$(prompt_with_default "Poll interval" "$DEFAULT_POLL_INTERVAL")
   unreachable_threshold=$(prompt_with_default "Unreachable threshold (consecutive failed polls)" "$DEFAULT_UNREACHABLE_THRESHOLD")
-  info "mutual TLS (leave all three empty to run plain HTTP)"
+  info "mutual TLS (leave a pair empty to skip it; empty client pair = plain HTTP to agents)"
   tls_ca=$(prompt_with_default "TLS CA certificate file" "")
-  tls_cert=$(prompt_with_default "TLS certificate file (this dashboard)" "")
-  tls_key=$(prompt_with_default "TLS private key file (this dashboard)" "")
+  tls_client_cert=$(prompt_with_default "Client certificate shown to agents" "")
+  tls_client_key=$(prompt_with_default "Client private key" "")
+  tls_cert=$(prompt_with_default "Web UI server certificate (empty = plain HTTP UI)" "")
+  tls_key=$(prompt_with_default "Web UI private key" "")
 
   echo
   info "about to install minilab-dashboard as a systemd service (${SERVICE_NAME}) with:"
@@ -205,6 +207,8 @@ Environment=DISCOVERY_INTERVAL=${discovery_interval}
 Environment=POLL_INTERVAL=${poll_interval}
 Environment=UNREACHABLE_THRESHOLD=${unreachable_threshold}
 Environment=TLS_CA_FILE=${tls_ca}
+Environment=TLS_CLIENT_CERT_FILE=${tls_client_cert}
+Environment=TLS_CLIENT_KEY_FILE=${tls_client_key}
 Environment=TLS_CERT_FILE=${tls_cert}
 Environment=TLS_KEY_FILE=${tls_key}
 

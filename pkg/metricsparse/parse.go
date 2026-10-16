@@ -2,10 +2,13 @@ package metricsparse
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
+
+var metricLine = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*[{ ]`)
 
 type ParsedHostStats struct {
 	CPUUser   float64
@@ -63,7 +66,13 @@ func Parse(text string) (ParsedMetrics, error) {
 
 		name, labels, value, err := parseLine(line)
 		if err != nil {
-			return ParsedMetrics{}, fmt.Errorf("parse line %q: %w", line, err)
+			// A line we cannot read only matters if it is one of ours; another metric with a
+			// format quirk (e.g. a trailing timestamp) must not make a healthy agent look
+			// down. Text that is not a metric at all (an HTML error page) still fails.
+			if strings.HasPrefix(line, "minilab_") || !metricLine.MatchString(line) {
+				return ParsedMetrics{}, fmt.Errorf("parse line %q: %w", line, err)
+			}
+			continue
 		}
 
 		switch name {

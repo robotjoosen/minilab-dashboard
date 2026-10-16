@@ -4,10 +4,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/robotjoosen/minilab-dashboard/pkg/poller"
 	"github.com/robotjoosen/minilab-dashboard/pkg/registration"
 	"github.com/robotjoosen/minilab-dashboard/pkg/store"
+	"github.com/robotjoosen/minilab-dashboard/pkg/tlsconf"
 	"github.com/robotjoosen/minilab-dashboard/pkg/web"
 )
 
@@ -26,6 +31,17 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	clientTLS, serverTLS, err := tlsconf.Load(e.TLSCAFile, e.TLSCertFile, e.TLSKeyFile)
+	if err != nil {
+		slog.Error("failed to load TLS config", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	scheme := "http"
+	if clientTLS != nil {
+		agentclient.UseTLS(clientTLS)
+		scheme = "https"
+	}
+
 	s, err := store.Open(e.SQLitePath)
 	if err != nil {
 		slog.Error("failed to open store", slog.String("error", err.Error()))
@@ -33,17 +49,31 @@ func main() {
 	}
 	defer s.Close()
 
-	go runDiscoveryLoop(ctx, s, e.MDNSAgentServiceName, e.DiscoveryInterval)
+	go runDiscoveryLoop(ctx, s, scheme, e.MDNSAgentServiceName, e.DiscoveryInterval)
 	go runPollLoop(ctx, s, e.PollInterval, e.UnreachableThreshold)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", &web.IndexHandler{Store: s})
 	mux.Handle("/watch", &web.ToggleHandler{Store: s})
 
-	httpServer := &http.Server{Addr: e.HTTPListenAddr, Handler: mux}
+	httpServer := &http.Server{
+		Addr:              e.HTTPListenAddr,
+		Handler:           mux,
+		TLSConfig:         serverTLS,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	httpErr := make(chan error, 1)
 	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if serverTLS != nil {
+			err = httpServer.ListenAndServeTLS("", "") // cert comes from TLSConfig
+		} else {
+			err = httpServer.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			httpErr <- err
 			return
 		}
@@ -72,13 +102,17 @@ func main() {
 
 // runDiscoveryLoop periodically browses for agent advertisements and registers any not
 // already known to the store.
-func runDiscoveryLoop(ctx context.Context, s *store.Store, serviceName string, interval time.Duration) {
+func runDiscoveryLoop(ctx context.Context, s *store.Store, scheme, serviceName string, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	discoverOnce := func() {
 		err := discovery.Browse(serviceName, 5*time.Second, func(entry discovery.Entry) {
-			address := "http://" + entry.Addr + portSuffix(entry.Port)
+			if entry.Addr == "" {
+				slog.Warn("skipping agent advertised without an IPv4 address", slog.String("name", entry.Name))
+				return
+			}
+			address := fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(entry.Addr, strconv.Itoa(entry.Port)))
 			if err := registration.RegisterAgent(s, agentclient.FetchCapabilities, entry.Name, address); err != nil {
 				slog.Error("failed to register agent", slog.String("name", entry.Name), slog.String("error", err.Error()))
 			}
@@ -111,14 +145,22 @@ func runPollLoop(ctx context.Context, s *store.Store, interval time.Duration, th
 			return
 		}
 
+		// Poll in parallel: a dead device costs a full request timeout, and doing them one
+		// after another would let a few of them delay every healthy device's update.
+		var wg sync.WaitGroup
 		for _, d := range devices {
 			if d.Kind != "agent" {
 				continue
 			}
-			if err := poller.PollDevice(s, agentclient.FetchMetrics, d, threshold, time.Now()); err != nil {
-				slog.Error("poll failed", slog.String("device", d.Name), slog.String("error", err.Error()))
-			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := poller.PollDevice(s, agentclient.FetchMetrics, d, threshold, time.Now()); err != nil {
+					slog.Error("poll failed", slog.String("device", d.Name), slog.String("error", err.Error()))
+				}
+			}()
 		}
+		wg.Wait()
 	}
 
 	for {
@@ -129,23 +171,4 @@ func runPollLoop(ctx context.Context, s *store.Store, interval time.Duration, th
 			pollOnce()
 		}
 	}
-}
-
-func portSuffix(port int) string {
-	if port == 0 {
-		return ""
-	}
-	return ":" + itoa(port)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }

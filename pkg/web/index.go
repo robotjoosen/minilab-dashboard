@@ -1,9 +1,12 @@
 package web
 
 import (
+	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 
 	"github.com/robotjoosen/minilab-dashboard/pkg/domain"
@@ -43,10 +46,16 @@ type indexView struct {
 	EditMode bool
 }
 
+// internalError logs the real cause and shows the browser nothing about the internals.
+func internalError(w http.ResponseWriter, err error) {
+	slog.Error("render index failed", slog.String("error", err.Error()))
+	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
 func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	devices, err := h.Store.ListDevices()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 
@@ -62,15 +71,19 @@ func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			services, err = h.Store.ListWatchedServicesForDevice(d.ID)
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalError(w, err)
 			return
 		}
 
-		host, _ := h.Store.LatestHostStats(d.ID) // zero-value HostStats if never polled yet
+		host, err := h.Store.LatestHostStats(d.ID) // zero-value HostStats if never polled yet
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			internalError(w, err)
+			return
+		}
 
 		temperatures, err := h.Store.ListHostTemperatures(d.ID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalError(w, err)
 			return
 		}
 
@@ -104,7 +117,7 @@ func (h *IndexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := indexTemplate.Execute(w, view); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 	}
 }
 

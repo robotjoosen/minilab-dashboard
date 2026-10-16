@@ -250,17 +250,65 @@ func TestSaveAndListHostTemperatures(t *testing.T) {
 		t.Fatalf("unexpected temperatures: %+v", got)
 	}
 
-	// Saving again should update in place, not duplicate.
+	// Saving again replaces the set: the updated sensor is changed, the missing one is gone.
 	if err := s.SaveHostTemperatures(deviceID, []domain.Temperature{{Sensor: "cpu-thermal", Celsius: 61.0}}); err != nil {
 		t.Fatalf("SaveHostTemperatures() second call error = %v", err)
 	}
 	got, _ = s.ListHostTemperatures(deviceID)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 temperatures after re-saving one sensor, got %+v", got)
+	if len(got) != 1 || got[0].Sensor != "cpu-thermal" || got[0].Celsius != 61.0 {
+		t.Fatalf("expected only cpu-thermal at 61.0, got %+v", got)
 	}
-	for _, temp := range got {
-		if temp.Sensor == "cpu-thermal" && temp.Celsius != 61.0 {
-			t.Fatalf("expected cpu-thermal updated to 61.0, got %+v", temp)
-		}
+}
+
+func TestUpsertDiscoveredServicesRemovesGoneAndKeepsVersion(t *testing.T) {
+	s := openTestStore(t)
+	deviceID, _ := s.UpsertDevice("rocket", "http://192.168.8.203:9100", "agent")
+
+	_ = s.UpsertDiscoveredServices(deviceID, []domain.Service{
+		{Name: "ollama", Type: "docker", Version: "0.4.2"},
+		{Name: "old", Type: "docker", Version: "1"},
+	})
+
+	// "old" is gone from the agent; "ollama" now reports no version.
+	if err := s.UpsertDiscoveredServices(deviceID, []domain.Service{{Name: "ollama", Type: "docker"}}); err != nil {
+		t.Fatalf("UpsertDiscoveredServices() error = %v", err)
+	}
+
+	got, _ := s.ListServicesForDevice(deviceID)
+	if len(got) != 1 || got[0].Name != "ollama" || got[0].Version != "0.4.2" {
+		t.Fatalf("unexpected services: %+v", got)
+	}
+
+	if err := s.UpsertDiscoveredServices(deviceID, nil); err != nil {
+		t.Fatalf("UpsertDiscoveredServices(nil) error = %v", err)
+	}
+	if got, _ := s.ListServicesForDevice(deviceID); len(got) != 0 {
+		t.Fatalf("expected no services, got %+v", got)
+	}
+}
+
+func TestSavePoll(t *testing.T) {
+	s := openTestStore(t)
+	deviceID, _ := s.UpsertDevice("rocket", "http://192.168.8.203:9100", "agent")
+	_ = s.UpsertDiscoveredServices(deviceID, []domain.Service{{Name: "ollama", Type: "docker"}})
+	services, _ := s.ListServicesForDevice(deviceID)
+	_, _ = s.RecordPollFailure(deviceID, 1) // device is unreachable before the poll
+
+	now := time.Now()
+	err := s.SavePoll(
+		domain.HostStats{DeviceID: deviceID, CPUUser: 5, PolledAt: now},
+		[]domain.Temperature{{Sensor: "cpu-thermal", Celsius: 50}},
+		[]store.ServiceUpdate{{ID: services[0].ID, State: "up", Version: "1.0"}},
+	)
+	if err != nil {
+		t.Fatalf("SavePoll() error = %v", err)
+	}
+
+	devices, _ := s.ListDevices()
+	host, _ := s.LatestHostStats(deviceID)
+	temps, _ := s.ListHostTemperatures(deviceID)
+	services, _ = s.ListServicesForDevice(deviceID)
+	if devices[0].Status != "online" || host.CPUUser != 5 || len(temps) != 1 || services[0].LastState != "up" || services[0].Version != "1.0" {
+		t.Fatalf("unexpected state: %+v %+v %+v %+v", devices[0], host, temps, services[0])
 	}
 }

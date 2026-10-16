@@ -5,7 +5,7 @@
 
 The single-instance dashboard for a home lab of Raspberry Pis, Orange Pis, and whatever else
 ends up on the shelf. It discovers every [`minilab-agent`](https://github.com/robotjoosen/minilab-agent)
-instance (and ESPHome device) over mDNS, lets you pick which discovered services to watch, polls
+instance over mDNS, lets you pick which discovered services to watch, polls
 them on a timer, and serves a web UI showing device and service health.
 
 Part of the Mini Lab Monitoring Dashboard initiative — this is Phase 1: pure observability, no
@@ -99,15 +99,35 @@ defaults.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MODE` | `PROD` | `DEV` or `PROD` |
 | `LOG_LEVEL` | `INFO` | slog level |
 | `HTTP_LISTEN_ADDR` | `:8080` | Where the web UI is served |
 | `SQLITE_PATH` | `./minilab-dashboard.db` | Path to the dashboard's own database |
 | `MDNS_AGENT_SERVICE_NAME` | `_minilab-agent._tcp` | mDNS service type to browse for agents |
-| `MDNS_ESPHOME_SERVICE_NAME` | `_esphomelib._tcp` | mDNS service type to browse for ESPHome devices |
 | `DISCOVERY_INTERVAL` | `1m` | How often to re-browse mDNS |
 | `POLL_INTERVAL` | `15s` | How often to poll watched services |
-| `UNREACHABLE_THRESHOLD` | `3` | Consecutive failed polls before a device is marked unreachable |
+| `UNREACHABLE_THRESHOLD` | `3` | Consecutive failed polls before a device is marked unreachable (min 1) |
+| `TLS_CA_FILE` | empty | PEM of the private CA that signs every certificate (dashboard, agents, browsers) |
+| `TLS_CERT_FILE` | empty | PEM certificate of this dashboard |
+| `TLS_KEY_FILE` | empty | PEM private key of this dashboard |
+
+`DISCOVERY_INTERVAL` and `POLL_INTERVAL` must be greater than zero; the dashboard refuses to
+start otherwise.
+
+### Mutual TLS
+
+Set all three `TLS_*` variables (or none — setting only some is a startup error) and:
+
+- **Web UI** is served over HTTPS and requires a client certificate signed by your CA, so only
+  browsers you have issued a certificate to can open it or toggle watches.
+- **Agent calls** (`/capabilities`, `/metrics`) use `https://`, present the dashboard's
+  certificate, and only accept agents whose certificate your CA signed.
+
+Agents are found by IP over mDNS and DHCP addresses change, so the agent's certificate is
+checked against the CA but **not against its hostname/IP** — which is why the CA must be private
+and used for nothing else. The dashboard certificate needs both `serverAuth` and `clientAuth`
+extended key usage. Each agent must be run with TLS and require client certificates from the same
+CA (a matching change in `minilab-agent`, not part of this repo); until it is, leave the `TLS_*`
+variables empty.
 
 ## Development
 
@@ -134,6 +154,7 @@ pkg/poller/             periodic /metrics poll → store update for watched serv
 pkg/discovery/          mDNS browser
 pkg/web/                HTTP handlers + templates — the status grid and watch toggle
 pkg/env/                env-to-struct loading (shared with go-health-service's own copy)
+pkg/tlsconf/            mutual-TLS client/server configs from the private CA
 ```
 
 ### Testing convention
@@ -144,7 +165,7 @@ supposed to be a clean API.
 
 ## Releasing
 
-Push a tag matching `v*`:
+CI (`go vet`, `go test`) runs on every push and pull request. Push a tag matching `v*`:
 
 ```bash
 git tag v0.1.0
@@ -152,7 +173,7 @@ git push origin v0.1.0
 ```
 
 The [release workflow](.github/workflows/release.yml) cross-compiles for linux/arm64 and
-publishes it as `minilab-dashboard-linux-arm64` — the exact name `scripts/install.sh` and
+publishes it as `minilab-dashboard-linux-arm64` (plus a `.sha256` that the install/update scripts verify before installing) — the exact name `scripts/install.sh` and
 `scripts/update.sh` look for.
 
 ## Design notes
@@ -162,6 +183,8 @@ publishes it as `minilab-dashboard-linux-arm64` — the exact name `scripts/inst
 - **Only watched services get polled.** Discovery populates the full list of what an agent
   reports, but polling — the thing that costs a network round trip every interval — only happens
   for services someone explicitly opted into watching.
+- **A poll is one transaction.** Host stats, temperatures and watched-service states land
+  together or not at all, and sensors/services an agent stops reporting are removed.
 - **A single SQLite connection.** This is a single-process, single-instance dashboard, so the
   store forces `SetMaxOpenConns(1)` rather than letting pooled connections arbitrate file locks
   with each other.

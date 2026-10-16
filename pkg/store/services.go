@@ -1,24 +1,47 @@
 package store
 
 import (
+	"strings"
 	"time"
 
 	"github.com/robotjoosen/minilab-dashboard/pkg/domain"
 )
 
+// UpsertDiscoveredServices makes the device's stored services match the agent's current
+// list: new ones are added, known ones updated, and ones the agent no longer reports removed.
+// An empty version from the agent never overwrites one the poller already learned.
 func (s *Store) UpsertDiscoveredServices(deviceID int64, services []domain.Service) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	args := []any{deviceID}
+	placeholders := make([]string, 0, len(services))
 	for _, svc := range services {
-		_, err := s.db.Exec(`
+		if _, err := tx.Exec(`
 INSERT INTO services (device_id, name, type, version)
 VALUES (?, ?, ?, ?)
-ON CONFLICT(device_id, name) DO UPDATE SET type = excluded.type, version = excluded.version
-`, deviceID, svc.Name, svc.Type, svc.Version)
-		if err != nil {
+ON CONFLICT(device_id, name) DO UPDATE SET type = excluded.type,
+	version = CASE WHEN excluded.version != '' THEN excluded.version ELSE services.version END
+`, deviceID, svc.Name, svc.Type, svc.Version); err != nil {
 			return err
 		}
+		args = append(args, svc.Name)
+		placeholders = append(placeholders, "?")
 	}
 
-	return nil
+	// "NOT IN ()" is invalid SQL, so an empty list needs the plain delete.
+	del := `DELETE FROM services WHERE device_id = ?`
+	if len(placeholders) > 0 {
+		del += ` AND name NOT IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	if _, err := tx.Exec(del, args...); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (s *Store) ToggleWatch(serviceID int64) (bool, error) {
@@ -74,6 +97,5 @@ func (s *Store) ListWatchedServicesForDevice(deviceID int64) ([]domain.Service, 
 }
 
 func (s *Store) UpdateServiceState(serviceID int64, state, version string, polledAt time.Time) error {
-	_, err := s.db.Exec(`UPDATE services SET last_state = ?, version = ?, last_polled_at = ? WHERE id = ?`, state, version, polledAt, serviceID)
-	return err
+	return updateServiceState(s.db, serviceID, state, version, polledAt)
 }

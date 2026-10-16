@@ -6,7 +6,7 @@ type Device struct {
 	ID      int64
 	Name    string
 	Address string
-	Kind    string // "agent" or "esphome"
+	Kind    string // always "agent" today
 	Status  string // "online" or "unreachable"
 }
 

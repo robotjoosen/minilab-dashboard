@@ -17,6 +17,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Test
+        run: |
+          go vet ./...
+          go test ./...
+
       - name: Build linux/arm64
         env:
           GOOS: linux
@@ -25,12 +30,13 @@ jobs:
         run: go build -o dist/minilab-dashboard-linux-arm64 ./cmd/app
 
       # Asset name must stay exactly minilab-dashboard-linux-arm64 --
-      # install.sh and update.sh look it up by this exact name.
+      # install.sh and update.sh look it up by this exact name, and fetch "<name>.sha256" beside it.
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ github.ref_name }}" \
             dist/minilab-dashboard-linux-arm64 \
+            dist/minilab-dashboard-linux-arm64.sha256 \
             --title "${{ github.ref_name }}" \
             --generate-notes

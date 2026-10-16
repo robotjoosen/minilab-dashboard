@@ -90,3 +90,29 @@ func itoa(n int64) string {
 	}
 	return string(digits)
 }
+
+func TestToggleHandlerUnknownServiceIs404(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	defer s.Close()
+
+	rec := httptest.NewRecorder()
+	(&web.ToggleHandler{Store: s}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/watch?service_id=999", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestToggleHandlerRejectsCrossSite(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	defer s.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/watch?service_id=1", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	(&web.ToggleHandler{Store: s}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}

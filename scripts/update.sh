@@ -25,14 +25,12 @@ DATA_DIR="/var/lib/minilab-dashboard"
 
 # Canonical set of env vars minilab-dashboard expects, with their defaults
 # from .env.dist -- used only for whatever's missing from the existing unit.
-ENV_KEYS=(MODE LOG_LEVEL HTTP_LISTEN_ADDR SQLITE_PATH MDNS_AGENT_SERVICE_NAME MDNS_ESPHOME_SERVICE_NAME DISCOVERY_INTERVAL POLL_INTERVAL UNREACHABLE_THRESHOLD)
+ENV_KEYS=(LOG_LEVEL HTTP_LISTEN_ADDR SQLITE_PATH MDNS_AGENT_SERVICE_NAME DISCOVERY_INTERVAL POLL_INTERVAL UNREACHABLE_THRESHOLD)
 declare -A ENV_DEFAULTS=(
-  [MODE]="PROD"
   [LOG_LEVEL]="INFO"
   [HTTP_LISTEN_ADDR]=":8080"
   [SQLITE_PATH]="./minilab-dashboard.db"
   [MDNS_AGENT_SERVICE_NAME]="_minilab-agent._tcp"
-  [MDNS_ESPHOME_SERVICE_NAME]="_esphomelib._tcp"
   [DISCOVERY_INTERVAL]="1m"
   [POLL_INTERVAL]="15s"
   [UNREACHABLE_THRESHOLD]="3"
@@ -188,6 +186,15 @@ main() {
 
   info "downloading binary..."
   curl -fsSL -o "$tmp_binary" "$asset_url"
+
+  info "verifying checksum..."
+  local expected actual
+  expected=$(curl -fsSL "${asset_url}.sha256" | cut -d' ' -f1) || { error "could not download the checksum file"; exit 1; }
+  actual=$(sha256sum "$tmp_binary" | cut -d' ' -f1)
+  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    error "checksum mismatch (expected '${expected}', got '${actual}') -- refusing to install"
+    exit 1
+  fi
   chmod +x "$tmp_binary"
 
   if confirm "Stop ${SERVICE_NAME} to apply the update?"; then
@@ -224,15 +231,16 @@ ExecStart=${INSTALL_PATH}
 Restart=on-failure
 User=${USER}
 WorkingDirectory=${DATA_DIR}
-Environment=MODE=${final_env[MODE]}
 Environment=LOG_LEVEL=${final_env[LOG_LEVEL]}
 Environment=HTTP_LISTEN_ADDR=${final_env[HTTP_LISTEN_ADDR]}
 Environment=SQLITE_PATH=${final_env[SQLITE_PATH]}
 Environment=MDNS_AGENT_SERVICE_NAME=${final_env[MDNS_AGENT_SERVICE_NAME]}
-Environment=MDNS_ESPHOME_SERVICE_NAME=${final_env[MDNS_ESPHOME_SERVICE_NAME]}
 Environment=DISCOVERY_INTERVAL=${final_env[DISCOVERY_INTERVAL]}
 Environment=POLL_INTERVAL=${final_env[POLL_INTERVAL]}
 Environment=UNREACHABLE_THRESHOLD=${final_env[UNREACHABLE_THRESHOLD]}
+Environment=TLS_CA_FILE=${CURRENT_ENV[TLS_CA_FILE]:-}
+Environment=TLS_CERT_FILE=${CURRENT_ENV[TLS_CERT_FILE]:-}
+Environment=TLS_KEY_FILE=${CURRENT_ENV[TLS_KEY_FILE]:-}
 
 [Install]
 WantedBy=multi-user.target

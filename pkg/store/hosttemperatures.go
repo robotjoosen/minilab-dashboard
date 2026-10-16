@@ -3,18 +3,7 @@ package store
 import "github.com/robotjoosen/minilab-dashboard/pkg/domain"
 
 func (s *Store) SaveHostTemperatures(deviceID int64, temperatures []domain.Temperature) error {
-	for _, t := range temperatures {
-		_, err := s.db.Exec(`
-INSERT INTO host_temperatures (device_id, sensor, celsius)
-VALUES (?, ?, ?)
-ON CONFLICT(device_id, sensor) DO UPDATE SET celsius = excluded.celsius
-`, deviceID, t.Sensor, t.Celsius)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return replaceHostTemperatures(s.db, deviceID, temperatures)
 }
 
 func (s *Store) ListHostTemperatures(deviceID int64) ([]domain.Temperature, error) {

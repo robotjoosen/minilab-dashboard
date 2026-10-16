@@ -56,3 +56,14 @@ func TestFetchMetrics(t *testing.T) {
 		t.Fatalf("unexpected metrics body: %q", body)
 	}
 }
+
+func TestFetchMetricsRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, 2<<20))
+	}))
+	defer srv.Close()
+
+	if _, err := agentclient.FetchMetrics(srv.URL); err == nil {
+		t.Fatal("expected an error for a body over the size limit")
+	}
+}

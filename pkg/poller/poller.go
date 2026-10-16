@@ -30,29 +30,9 @@ func PollDevice(s *store.Store, fetch MetricsFetcher, device domain.Device, thre
 		return err
 	}
 
-	if err := s.RecordPollSuccess(device.ID); err != nil {
-		return err
-	}
-
-	if err := s.SaveHostStats(domain.HostStats{
-		DeviceID:  device.ID,
-		CPUUser:   parsed.Host.CPUUser,
-		CPUSystem: parsed.Host.CPUSystem,
-		CPUIdle:   parsed.Host.CPUIdle,
-		MemUsed:   parsed.Host.MemUsed,
-		MemFree:   parsed.Host.MemFree,
-		MemTotal:  parsed.Host.MemTotal,
-		PolledAt:  now,
-	}); err != nil {
-		return err
-	}
-
 	temperatures := make([]domain.Temperature, len(parsed.Temperatures))
 	for i, t := range parsed.Temperatures {
 		temperatures[i] = domain.Temperature{Sensor: t.Sensor, Celsius: t.Celsius}
-	}
-	if err := s.SaveHostTemperatures(device.ID, temperatures); err != nil {
-		return err
 	}
 
 	watched, err := s.ListWatchedServicesForDevice(device.ID)
@@ -65,6 +45,7 @@ func PollDevice(s *store.Store, fetch MetricsFetcher, device domain.Device, thre
 		byName[svc.Name] = svc
 	}
 
+	updates := make([]store.ServiceUpdate, 0, len(watched))
 	for _, w := range watched {
 		state := "down"
 		version := w.Version
@@ -81,10 +62,17 @@ func PollDevice(s *store.Store, fetch MetricsFetcher, device domain.Device, thre
 			}
 		}
 
-		if err := s.UpdateServiceState(w.ID, state, version, now); err != nil {
-			return err
-		}
+		updates = append(updates, store.ServiceUpdate{ID: w.ID, State: state, Version: version})
 	}
 
-	return nil
+	return s.SavePoll(domain.HostStats{
+		DeviceID:  device.ID,
+		CPUUser:   parsed.Host.CPUUser,
+		CPUSystem: parsed.Host.CPUSystem,
+		CPUIdle:   parsed.Host.CPUIdle,
+		MemUsed:   parsed.Host.MemUsed,
+		MemFree:   parsed.Host.MemFree,
+		MemTotal:  parsed.Host.MemTotal,
+		PolledAt:  now,
+	}, temperatures, updates)
 }

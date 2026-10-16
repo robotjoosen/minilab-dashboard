@@ -22,12 +22,10 @@ UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 VERSION_MARKER="/usr/local/bin/.minilab-dashboard-version"
 DATA_DIR="/var/lib/minilab-dashboard"
 
-MODE="PROD"
 LOG_LEVEL="INFO"
 DEFAULT_HTTP_LISTEN_ADDR=":8080"
 DEFAULT_SQLITE_PATH="./minilab-dashboard.db"
 DEFAULT_MDNS_AGENT_SERVICE_NAME="_minilab-agent._tcp"
-DEFAULT_MDNS_ESPHOME_SERVICE_NAME="_esphomelib._tcp"
 DEFAULT_DISCOVERY_INTERVAL="1m"
 DEFAULT_POLL_INTERVAL="15s"
 DEFAULT_UNREACHABLE_THRESHOLD="3"
@@ -125,19 +123,31 @@ main() {
 
   info "downloading binary..."
   curl -fsSL -o "$tmp_binary" "$asset_url"
+
+  info "verifying checksum..."
+  local expected actual
+  expected=$(curl -fsSL "${asset_url}.sha256" | cut -d' ' -f1) || { error "could not download the checksum file"; exit 1; }
+  actual=$(sha256sum "$tmp_binary" | cut -d' ' -f1)
+  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    error "checksum mismatch (expected '${expected}', got '${actual}') -- refusing to install"
+    exit 1
+  fi
   chmod +x "$tmp_binary"
 
   echo
   info "configuration (press enter to accept the default)"
-  local http_listen_addr sqlite_path mdns_agent_service_name mdns_esphome_service_name
+  local http_listen_addr sqlite_path mdns_agent_service_name tls_ca tls_cert tls_key
   local discovery_interval poll_interval unreachable_threshold
   http_listen_addr=$(prompt_with_default "HTTP listen addr" "$DEFAULT_HTTP_LISTEN_ADDR")
   sqlite_path=$(prompt_with_default "SQLite path (relative to ${DATA_DIR})" "$DEFAULT_SQLITE_PATH")
   mdns_agent_service_name=$(prompt_with_default "mDNS agent service name" "$DEFAULT_MDNS_AGENT_SERVICE_NAME")
-  mdns_esphome_service_name=$(prompt_with_default "mDNS ESPHome service name" "$DEFAULT_MDNS_ESPHOME_SERVICE_NAME")
   discovery_interval=$(prompt_with_default "Discovery interval" "$DEFAULT_DISCOVERY_INTERVAL")
   poll_interval=$(prompt_with_default "Poll interval" "$DEFAULT_POLL_INTERVAL")
   unreachable_threshold=$(prompt_with_default "Unreachable threshold (consecutive failed polls)" "$DEFAULT_UNREACHABLE_THRESHOLD")
+  info "mutual TLS (leave all three empty to run plain HTTP)"
+  tls_ca=$(prompt_with_default "TLS CA certificate file" "")
+  tls_cert=$(prompt_with_default "TLS certificate file (this dashboard)" "")
+  tls_key=$(prompt_with_default "TLS private key file (this dashboard)" "")
 
   echo
   info "about to install minilab-dashboard as a systemd service (${SERVICE_NAME}) with:"
@@ -187,15 +197,16 @@ ExecStart=${INSTALL_PATH}
 Restart=on-failure
 User=${USER}
 WorkingDirectory=${DATA_DIR}
-Environment=MODE=${MODE}
 Environment=LOG_LEVEL=${LOG_LEVEL}
 Environment=HTTP_LISTEN_ADDR=${http_listen_addr}
 Environment=SQLITE_PATH=${sqlite_path}
 Environment=MDNS_AGENT_SERVICE_NAME=${mdns_agent_service_name}
-Environment=MDNS_ESPHOME_SERVICE_NAME=${mdns_esphome_service_name}
 Environment=DISCOVERY_INTERVAL=${discovery_interval}
 Environment=POLL_INTERVAL=${poll_interval}
 Environment=UNREACHABLE_THRESHOLD=${unreachable_threshold}
+Environment=TLS_CA_FILE=${tls_ca}
+Environment=TLS_CERT_FILE=${tls_cert}
+Environment=TLS_KEY_FILE=${tls_key}
 
 [Install]
 WantedBy=multi-user.target

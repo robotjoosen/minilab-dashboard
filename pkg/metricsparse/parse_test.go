@@ -157,7 +157,7 @@ minilab_host_temperature_celsius{sensor="gpu-thermal"} 45.2
 }
 
 func TestParseMalformedLine(t *testing.T) {
-	_, err := metricsparse.Parse("not_a_valid_metric_line {{{")
+	_, err := metricsparse.Parse("<html>bad gateway</html>")
 	if err == nil {
 		t.Fatal("expected an error for malformed input")
 	}
@@ -170,5 +170,19 @@ func TestParseEmptyInput(t *testing.T) {
 	}
 	if len(got.Services) != 0 {
 		t.Fatalf("expected no services for empty input, got %+v", got.Services)
+	}
+}
+
+func TestParseToleratesUnrelatedMetricQuirks(t *testing.T) {
+	got, err := metricsparse.Parse("go_goroutines 12 1700000000\nminilab_host_cpu_percent{mode=\"user\"} 1.5\n")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if got.Host.CPUUser != 1.5 {
+		t.Fatalf("unexpected host stats: %+v", got.Host)
+	}
+
+	if _, err := metricsparse.Parse("minilab_host_cpu_percent{mode=\"user\"} nope\n"); err == nil {
+		t.Fatal("expected an error for a malformed minilab_ line")
 	}
 }
